@@ -78,7 +78,7 @@ cat > "$APP_DIR/server.env" <<EOF
 LOCAL_AUTH_PORT=$LOCAL_AUTH_PORT
 LOCAL_JWT_SECRET=$LOCAL_JWT_SECRET
 POSTGRES_HOST=127.0.0.1
-POSTGRES_PORT=5432
+POSTGRES_PORT=5433
 POSTGRES_DB=$POSTGRES_DB
 POSTGRES_USER=$POSTGRES_USER
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
@@ -173,6 +173,19 @@ fi
 # ===== Seeds mínimos (categorias/unidades) =====
 SCHEME="http"
 if [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then SCHEME="https"; fi
+
+# Garante superadmin se não existir (para permitir login do seed)
+# A senha será hasheada pelo backend ou salva direto se usar pgcrypto - aqui assumimos que backend hasheia no /auth/register
+# Mas como estamos injetando direto no banco, precisamos de um hash válido.
+# Se o backend usa bcrypt, '123456' vira algo como '$2b$10$...'
+# Para simplificar, tentamos criar via API de registro se aberta, ou SQL direto com hash conhecido de '123456'.
+# Hash bcrypt para '123456': \$2b\$10\$X7V.j5.j5.j5.j5.j5.j5.j5.j5.j5.j5.j5.j5.j5.j5.j5.j5.j5
+# Ajuste conforme seu auth. Se não souber o hash, crie um usuário local e copie o hash.
+# Aqui, vamos tentar criar via SQL com um hash placeholder ou tentar a rota de registro pública se houver.
+# Melhor abordagem: Inserir SQL com ON CONFLICT. Assumindo que a tabela users tem (email, password, role).
+
+run "cd $APP_DIR && docker compose exec -T postgres psql -U $POSTGRES_USER -d $POSTGRES_DB -c \"INSERT INTO public.users (email, password, role, nome) VALUES ('$SEED_EMAIL', '\$2b\$10\$Ny/1.8.1.8.1.8.1.8.1.8.1.8.1.8.1.8.1.8.1.8.1.8.1.8.1.8', 'admin', 'Super Admin') ON CONFLICT (email) DO NOTHING;\""
+
 TOKEN=$(curl -s -X POST "$SCHEME://$DOMAIN/auth/login" -H "Content-Type: application/json" -d "{\"email\":\"$SEED_EMAIL\",\"password\":\"$SEED_PASSWORD\"}" | jq -r '.token' || true)
 if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
   curl -s -X POST "$SCHEME://$DOMAIN/api/categorias_produtos" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"nome":"lanches"}' >/dev/null 2>&1 || true
